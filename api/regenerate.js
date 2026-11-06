@@ -7,29 +7,22 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Password salah!' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  const imageUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${apiKey}`;
-
   try {
     const isCover = slide.slideNumber === 1;
     const extraStyle = isCover ? "Eye-catching COVER SLIDE, bold typography." : "Professional infographic layout.";
-    const imagePrompt = `Carousel slide design (ratio ${ratio}) for ${platform}. Background: ${slide.visualPrompt}. Style: ${extraStyle}. MUST write text: Headline: "${slide.headline}", Subtext: "${slide.subtext}", Page: "${slide.slideNumber}/${numSlides}".`;
-
-    const imgResponse = await fetch(imageUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: imagePrompt }] }], generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: ratio } } })
-    });
-
-    const imgData = await imgResponse.json();
-    const base64Data = imgData?.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+    const imagePrompt = `Carousel design for ${platform}. Background: ${slide.visualPrompt}. Style: ${extraStyle}. Write text: "${slide.headline}"`;
     
-    if (base64Data) {
-      const mimeType = imgData.candidates[0].content.parts.find(p => p.inlineData).inlineData.mimeType || 'image/jpeg';
-      return res.status(200).json({ imgSrc: `data:${mimeType};base64,${base64Data}` });
-    } else {
-      return res.status(500).json({ error: 'Google AI gagal membuat gambar ini.' });
-    }
+    let width = 900; let height = 1600;
+    if(ratio === '1:1') { width = 1080; height = 1080; }
+    else if(ratio === '4:5') { width = 1080; height = 1350; }
+    else if(ratio === '16:9') { width = 1920; height = 1080; }
+
+    // Tambahkan angka acak (timestamp) agar selalu menghasilkan gambar baru (tidak di-cache)
+    const randomSeed = Date.now();
+    const encodedPrompt = encodeURIComponent(imagePrompt);
+    const newImgUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&seed=${randomSeed}&nologo=true`;
+
+    return res.status(200).json({ imgSrc: newImgUrl });
   } catch (error) {
     return res.status(500).json({ error: 'Terjadi kesalahan jaringan.' });
   }
