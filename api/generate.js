@@ -1,5 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -13,22 +11,29 @@ export default async function handler(req, res) {
   }
 
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY belum disetel di Environment Variables Vercel!');
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY belum disetel di Vercel!');
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    
-    const prompt = `Buatkan konten carousel untuk ${platform} dengan rasio ${ratio} sebanyak ${slidesCount} slide. 
-    Topik: "${topic}".
-    Berikan hasilnya dalam format JSON murni berupa array of objects, di mana setiap object punya property "title" (judul singkat, max 5 kata) dan "content" (poin penjelasan singkat). Jangan pakai markdown backtick, langsung JSON saja.`;
+    const prompt = `Buatkan konten carousel untuk ${platform} dengan rasio ${ratio} sebanyak ${slidesCount} slide. Topik: "${topic}". Berikan hasilnya dalam format JSON murni berupa array of objects, di mana setiap object punya property "title" (judul singkat max 5 kata) dan "content" (poin penjelasan singkat). Jangan pakai markdown backtick, langsung JSON array saja.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
+    // Memanggil API Gemini langsung menggunakan fetch bawaan (Tanpa Install Library Tambahan)
+    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
     });
 
-    let rawText = response.text.trim();
+    const data = await geminiRes.json();
+    
+    if (data.error) {
+      throw new Error(data.error.message || 'Gagal dari Google Gemini');
+    }
+
+    let rawText = data.candidates[0].content.parts[0].text.trim();
     rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
     const slidesData = JSON.parse(rawText);
 
@@ -50,6 +55,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error("SERVER ERROR:", error);
-    return res.status(500).json({ error: 'Terjadi kesalahan server: ' + error.message });
+    return res.status(500).json({ error: 'Server Error: ' + error.message });
   }
 }
