@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Instagram Carousel Generator - Secured</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .carousel-container { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 1rem; padding-bottom: 1rem; }
+        .carousel-slide { scroll-snap-align: start; flex: 0 0 auto; width: 300px; height: 533px; border-radius: 0.5rem; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #e5e7eb; position: relative; }
+        .carousel-slide img { width: 100%; height: 100%; object-fit: cover; }
+        .loader { border: 3px solid #f3f3f3; border-radius: 50%; border-top: 3px solid #3b82f6; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        const App = () => {
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const [password, setPassword] = useState('');
+            const [loginError, setLoginError] = useState('');
+            
+            const [topic, setTopic] = useState('');
+            const [numSlides, setNumSlides] = useState(4);
+            const [platform, setPlatform] = useState('Instagram');
+            const [aspectRatio, setAspectRatio] = useState('9:16');
+            
+            const [loading, setLoading] = useState(false);
+            const [status, setStatus] = useState('');
+            const [generatedData, setGeneratedData] = useState(null);
+            const [copied, setCopied] = useState(false);
+            const [errorMsg, setErrorMsg] = useState('');
+            const [slideLoading, setSlideLoading] = useState({});
+            const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                // Ini password sekuritas dasar untuk web frontend
+                if (password.trim() !== '') {
+                    setIsAuthenticated(true);
+                    setLoginError('');
+                } else {
+                    setLoginError('Password tidak boleh kosong!');
+                }
+            };
+
+            // FUNGSI UTAMA: GENERATE CAROUSEL (MENGGUNAKAN BACKEND VERCEL)
+            const generateContent = async () => {
+                if (!topic.trim()) {
+                    setErrorMsg('Silakan masukkan topik terlebih dahulu.');
+                    return;
+                }
+
+                setLoading(true);
+                setErrorMsg('');
+                setGeneratedData(null);
+                setStatus('Menghubungkan ke server Vercel...');
+
+                try {
+                    // Kita memanggil backend /api/generate yang ada di Vercel
+                    const response = await fetch('/api/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            topic: topic,
+                            numSlides: numSlides,
+                            platform: platform,
+                            aspectRatio: aspectRatio,
+                            password: password // Mengirim password ke Vercel untuk validasi
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Gagal memproses permintaan dari server.');
+                    }
+
+                    setGeneratedData(data);
+                    setStatus('Selesai!');
+
+                } catch (error) {
+                    console.error("Generation error:", error);
+                    setErrorMsg(error.message || "Terjadi kesalahan saat memproses permintaan Anda.");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // FUNGSI KEDUA: GENERATE ULANG 1 GAMBAR (MENGGUNAKAN BACKEND VERCEL)
+            const regenerateSingleImage = async (index) => {
+                setSlideLoading(prev => ({ ...prev, [index]: true }));
+                setErrorMsg('');
+                const slide = generatedData.slides[index];
+
+                try {
+                    // Panggil backend rahasia kita yang baru (/api/regenerate)
+                    const response = await fetch('/api/regenerate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            slide: slide, 
+                            ratio: generatedData.ratio, 
+                            platform: generatedData.platform,
+                            numSlides: numSlides,
+                            password: password 
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || 'Gagal memproses gambar baru.');
+                    }
+
+                    // Update gambar di layar
+                    const newData = { ...generatedData };
+                    newData.slides[index].imgSrc = data.imgSrc;
+                    setGeneratedData(newData);
+
+                } catch (err) {
+                    console.error("Error generating image", err);
+                    setErrorMsg(err.message);
+                } finally {
+                    setSlideLoading(prev => ({ ...prev, [index]: false }));
+                }
+            };
+
+            const handleSlideChange = (index, field, value) => {
+                const newData = { ...generatedData };
+                newData.slides[index][field] = value;
+                setGeneratedData(newData);
+            };
+
+            const copyToClipboard = () => {
+                const textToCopy = `${generatedData?.caption}\n\n${generatedData?.hashtags}`;
+                try {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = textToCopy;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                } catch (err) {
+                    console.error('Failed to copy text: ', err);
+                }
+            };
+
+            const downloadImage = (imgSrc, slideNumber) => {
+                fetch(imgSrc)
+                    .then(res => res.blob())
+                    .then(blob => {
+                        const blobUrl = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = blobUrl;
+                        link.download = `slide-${slideNumber}.jpg`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+                    })
+                    .catch(err => {
+                        const link = document.createElement('a');
+                        link.href = imgSrc;
+                        link.download = `slide-${slideNumber}.jpg`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                    });
+            };
+
+            const downloadAllImages = async () => {
+                if (!generatedData || !generatedData.slides || typeof JSZip === 'undefined') return;
+                
+                setIsDownloadingAll(true);
+                try {
+                    const zip = new JSZip();
+                    const folderName = topic ? topic.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'carousel';
+                    
+                    generatedData.slides.forEach((slide) => {
+                        if (slide.imgSrc && slide.imgSrc.startsWith('data:image')) {
+                            const base64Data = slide.imgSrc.split(',')[1];
+                            zip.file(`slide-${slide.slideNumber}.jpg`, base64Data, {base64: true});
+                        }
+                    });
+
+                    const content = await zip.generateAsync({type: "blob"});
+                    const blobUrl = URL.createObjectURL(content);
+                    const link = document.createElement('a');
+                    link.href = blobUrl;
+                    link.download = `${folderName}_all_slides.zip`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+                } catch (error) {
+                    console.error("Gagal membuat file zip:", error);
+                    setErrorMsg("Gagal mengunduh semua file.");
+                } finally {
+                    setIsDownloadingAll(false);
+                }
+            };
+
+            if (!isAuthenticated) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 w-full max-w-md">
+                            <div className="text-center mb-8">
+                                <div className="bg-blue-600 w-14 h-14 rounded-xl text-white flex items-center justify-center mx-auto mb-5 text-2xl shadow-md">
+                                    <i className="fa-solid fa-lock"></i>
+                                </div>
+                                <h2 className="text-2xl font-bold text-gray-900">Akses Terkunci</h2>
+                                <p className="text-gray-500 mt-2 text-sm">Masukkan password aplikasi (sama dengan APP_PASSWORD di Vercel).</p>
+                            </div>
+                            <form onSubmit={handleLogin} className="space-y-5">
+                                <div>
+                                    <input 
+                                        type="password" 
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-center tracking-[0.3em]"
+                                        placeholder="••••••"
+                                    />
+                                </div>
+                                {loginError && (
+                                    <div className="p-3 bg-red-50 text-red-600 text-sm text-center rounded-lg border border-red-100">
+                                        {loginError}
+                                    </div>
+                                )}
+                                <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold">
+                                    Buka Akses
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50 pb-12">
+                    <nav className="bg-white shadow-sm border-b border-gray-200">
+                        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center gap-2">
+                            <div className="bg-blue-600 p-2 rounded-lg text-white"><i className="fa-solid fa-layer-group"></i></div>
+                            <h1 className="text-xl font-bold text-gray-900">AutoCarousel AI (Secure)</h1>
+                        </div>
+                    </nav>
+
+                    <main className="max-w-5xl mx-auto px-4 mt-8">
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-8">
+                            <h2 className="text-lg font-semibold text-gray-800 mb-4">Mulai Buat Carousel</h2>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                                <div className="md:col-span-3">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Topik Konten</label>
+                                    <input type="text" value={topic} onChange={(e) => setTopic(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none" disabled={loading} />
+                                </div>
+                                <div className="md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Platform</label>
+                                    <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-300 outline-none" disabled={loading}>
+                                        <option value="Instagram">Instagram</option>
+                                        <option value="TikTok">TikTok</option>
+                                    </select>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Rasio</label>
+                                    <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-gray-300 outline-none" disabled={loading}>
+                                        <option value="9:16">9:16 (Story)</option>
+                                        <option value="1:1">1:1 (Square)</option>
+                                    </select>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Slide</label>
+                                    <select value={numSlides} onChange={(e) => setNumSlides(parseInt(e.target.value))} className="w-full px-4 py-3 rounded-xl border border-gray-300 outline-none" disabled={loading}>
+                                        {[2,3,4,5,6].map(num => <option key={num} value={num}>{num} Slide</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {errorMsg && (
+                                <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg text-sm border border-red-100">
+                                    <i className="fa-solid fa-triangle-exclamation mr-2"></i>{errorMsg}
+                                </div>
+                            )}
+
+                            <div className="mt-6 flex items-center justify-between">
+                                <div className="flex items-center text-gray-500 text-sm">
+                                    {loading && <><div className="loader mr-3"></div><span className="font-medium animate-pulse">{status}</span></>}
+                                </div>
+                                <button onClick={generateContent} disabled={loading || !topic.trim()} className={`px-6 py-3 rounded-xl font-semibold text-white ${loading || !topic.trim() ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                    <i className="fa-solid fa-wand-magic-sparkles mr-2"></i> Generate Sekarang
+                                </button>
+                            </div>
+                        </div>
+
+                        {generatedData && !loading && (
+                            <div className="space-y-8">
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-xl font-bold text-gray-800">Preview Carousel</h3>
+                                        <button onClick={downloadAllImages} disabled={isDownloadingAll} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold">
+                                            <i className="fa-solid fa-file-zipper mr-2"></i> Unduh Semua (ZIP)
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        {generatedData.slides.map((slide, idx) => (
+                                            <div key={idx} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                                                <div className="relative bg-gray-100 w-full group" style={{ aspectRatio: generatedData.ratio.replace(':', '/') }}>
+                                                    {slideLoading[idx] && (
+                                                        <div className="absolute inset-0 bg-white/80 z-10 flex flex-col items-center justify-center">
+                                                            <div className="loader mb-2"></div>
+                                                            <span className="text-sm">Memproses...</span>
+                                                        </div>
+                                                    )}
+                                                    <img src={slide.imgSrc} className="w-full h-full object-cover"/>
+                                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                                                        <button onClick={() => downloadImage(slide.imgSrc, slide.slideNumber)} className="p-3 bg-white rounded-full text-gray-800"><i className="fa-solid fa-download"></i></button>
+                                                        <button onClick={() => regenerateSingleImage(idx)} className="p-3 bg-blue-600 rounded-full text-white"><i className="fa-solid fa-rotate-right"></i></button>
+                                                    </div>
+                                                </div>
+                                                <div className="p-4 space-y-3 flex-1 flex flex-col bg-gray-50 border-t border-gray-100">
+                                                    <span className="text-xs font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded w-max">Slide {slide.slideNumber}</span>
+                                                    <input type="text" value={slide.headline} onChange={(e) => handleSlideChange(idx, 'headline', e.target.value)} className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300" />
+                                                    <textarea value={slide.subtext} onChange={(e) => handleSlideChange(idx, 'subtext', e.target.value)} rows="2" className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 resize-none"></textarea>
+                                                    <button onClick={() => regenerateSingleImage(idx)} disabled={slideLoading[idx]} className="mt-auto w-full py-2 bg-white border border-gray-300 text-sm rounded-lg">
+                                                        <i className="fa-solid fa-rotate-right"></i> Generate Ulang Gambar Ini
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        };
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
