@@ -1,57 +1,57 @@
-// File: api/generate.js
+import { GoogleGenAI } from '@google/genai';
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const { topic, numSlides, platform, aspectRatio, password } = req.body;
-  
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { topic, platform, ratio, slidesCount, password } = req.body;
+
+  // Cek Password Keamanan
   if (password !== process.env.APP_PASSWORD) {
     return res.status(401).json({ error: 'Password salah atau tidak valid!' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'API Key belum diatur.' });
-
   try {
-    // 1. Minta Gemini membuat struktur dan teksnya
-    const textPrompt = `Kamu adalah content creator ${platform}. Buat carousel ${numSlides} slide topik '${topic}'. Output JSON persis: {"slides": [{"slideNumber": 1, "headline": "Judul (maks 5 kata)", "subtext": "Teks (maks 10 kata)", "visualPrompt": "deskripsi background detail bahasa inggris"}], "caption": "Caption", "hashtags": "#tag"}`;
-    const textUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     
-    const textResponse = await fetch(textUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: textPrompt }] }], generationConfig: { responseMimeType: "application/json" } })
+    // Minta Gemini membuatkan teks konten carousel
+    const prompt = `Buatkan konten carousel untuk ${platform} dengan rasio ${ratio} sebanyak ${slidesCount} slide. 
+    Topik: "${topic}".
+    Berikan hasilnya dalam format JSON murni berupa array of objects, di mana setiap object punya property "title" (judul singkat, max 5 kata) dan "content" (poin penjelasan singkat). Jangan pakai markdown backtick, langsung JSON saja.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
     });
 
-    const textData = await textResponse.json();
-    const jsonText = textData.candidates?.[0]?.content?.parts?.[0]?.text;
-    const parsedData = JSON.parse(jsonText);
+    let rawText = response.text.trim();
+    rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const slidesData = JSON.parse(rawText);
 
-    // 2. Gunakan Image Server super cepat untuk gambarnya (tanpa membebani Vercel)
-    const slidesWithImages = [];
-    
-    // Tentukan ukuran pixel berdasarkan rasio
-    let width = 900; let height = 1600;
-    if(aspectRatio === '1:1') { width = 1080; height = 1080; }
-    else if(aspectRatio === '4:5') { width = 1080; height = 1350; }
-    else if(aspectRatio === '16:9') { width = 1920; height = 1080; }
-
-    for (let i = 0; i < parsedData.slides.length; i++) {
-      const slide = parsedData.slides[i];
-      // Format URL gambar menggunakan Pollinations AI (gratis & cepat)
-      const imagePrompt = `Carousel background for ${platform}. ${slide.visualPrompt}. Write text on image: "${slide.headline}". Modern minimal style.`;
-      const encodedPrompt = encodeURIComponent(imagePrompt);
+    // Kita buatkan gambar background bersih menggunakan generator URL publik yang aman dari limit
+    const finalSlides = slidesData.map((slide, index) => {
+      const bgColors = ['1e293b', '0f172a', '312e81', '14532d', '701a75'];
+      const randomBg = bgColors[index % bgColors.length];
       
-      // Berikan URL-nya ke Frontend, biarkan browser pengunjung yang mendownload gambarnya!
-      slide.imgSrc = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true`;
-      slidesWithImages.push(slide);
-    }
+      // Menggunakan background CSS/SVG dinamis yang di-generate via URL instan (Tanpa Limit)
+      const encodedTitle = encodeURIComponent(slide.title);
+      const encodedContent = encodeURIComponent(slide.content);
+      
+      // Menggunakan layanan placeholder gambar bersih bernuansa profesional
+      const imageUrl = `https://placehold.co/1080x1920/${randomBg}/ffffff/png?text=${encodedTitle}&font=montserrat`;
 
-    parsedData.slides = slidesWithImages;
-    parsedData.ratio = aspectRatio;
-    parsedData.platform = platform;
-    
-    return res.status(200).json(parsedData);
+      return {
+        title: slide.title,
+        content: slide.content,
+        imageUrl: imageUrl
+      };
+    });
+
+    return res.status(200).json({ slides: finalSlides });
+
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Terjadi kesalahan saat memproses.' });
+    return res.status(500).json({ error: 'Gagal memproses AI: ' + error.message });
   }
 }
